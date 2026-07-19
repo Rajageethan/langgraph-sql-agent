@@ -76,3 +76,7 @@ async def resume(req: ResumeRequest):
             yield f"data: {json.dumps({'status': 'complete', 'answer': final_state.get('answer', ''), 'sql': final_state.get('sql', ''), 'result': final_state.get('result', '')})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
