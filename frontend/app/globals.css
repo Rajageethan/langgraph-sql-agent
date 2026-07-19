@@ -409,6 +409,16 @@ html, body {
 
 .fade-in { animation: appear 0.15s ease forwards; }
 
+/* ── Chat history turn ───────────────────────────────────── */
+
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
 /* ── About panel ─────────────────────────────────────────── */
 
 .about-panel {

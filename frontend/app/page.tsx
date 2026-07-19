@@ -27,6 +27,13 @@ interface Step {
   key: string;
 }
 
+interface HistoryItem {
+  id: string;
+  question: string;
+  answer: CompleteEvent | null;
+  errorMsg: string;
+}
+
 // ─── Inline stepper ───────────────────────────────────────────────────────────
 // Renders:  generating sql → validating sql → [current step]
 // Done steps are dim, current step is white+bold, separator is faint
@@ -225,6 +232,7 @@ function ErrorBlock({ message }: { message: string }) {
 export default function Home() {
   const [phase, setPhase]               = useState<Phase>("idle");
   const [question, setQuestion]         = useState("");
+  const [submittedQuestion, setSubmittedQuestion] = useState("");
   const [askSteps, setAskSteps]         = useState<Step[]>([]);
   const [resumeSteps, setResumeSteps]   = useState<Step[]>([]);
   const [pendingSQL, setPendingSQL]     = useState("");
@@ -232,15 +240,20 @@ export default function Home() {
   const [threadId, setThreadId]         = useState<string | null>(null);
   const [answer, setAnswer]             = useState<CompleteEvent | null>(null);
   const [errorMsg, setErrorMsg]         = useState("");
+  const [history, setHistory]           = useState<HistoryItem[]>([]);
 
   const cleanupRef    = useRef<(() => void) | null>(null);
   const askCounter    = useRef(0);
   const resumeCounter = useRef(0);
+  const historyId     = useRef(0);
   const bottomRef     = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [phase, askSteps.length, resumeSteps.length]);
+    const id = setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 0);
+    return () => clearTimeout(id);
+  }, [phase, askSteps.length, resumeSteps.length, answer, errorMsg, history.length]);
 
   useEffect(() => () => { cleanupRef.current?.(); }, []);
 
@@ -252,6 +265,7 @@ export default function Home() {
   const reset = useCallback(() => {
     cancelStream();
     setPhase("idle");
+    setQuestion("");
     setAskSteps([]);
     setResumeSteps([]);
     setPendingSQL("");
@@ -259,6 +273,8 @@ export default function Home() {
     setThreadId(null);
     setAnswer(null);
     setErrorMsg("");
+    setSubmittedQuestion("");
+    setHistory([]);
     askCounter.current = 0;
     resumeCounter.current = 0;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -268,8 +284,39 @@ export default function Home() {
   const handleAsk = useCallback(() => {
     const q = question.trim();
     if (!q) return;
-    reset();
+
+    // Archive current completed turn into chat history before starting a new one
+    setHistory(prev => {
+      if (submittedQuestion && (phase === "complete" || phase === "error")) {
+        historyId.current += 1;
+        return [
+          ...prev,
+          {
+            id: `h${historyId.current}`,
+            question: submittedQuestion,
+            answer: phase === "complete" ? answer : null,
+            errorMsg: phase === "error" ? errorMsg : "",
+          },
+        ];
+      }
+      return prev;
+    });
+
+    // Reset current-turn state (history is preserved above)
+    cancelStream();
+    setQuestion("");
+    setAskSteps([]);
+    setResumeSteps([]);
+    setPendingSQL("");
+    setPendingPreview(null);
+    setThreadId(null);
+    setAnswer(null);
+    setErrorMsg("");
+    // Set submittedQuestion AFTER all other resets so it wins the batch
+    setSubmittedQuestion(q);
     setPhase("streaming");
+    askCounter.current = 0;
+    resumeCounter.current = 0;
 
     cleanupRef.current = askQuestion(q, {
       onProgress: (e: ProgressEvent) => {
@@ -288,7 +335,7 @@ export default function Home() {
       onComplete: (e: CompleteEvent) => { setAnswer(e); setPhase("complete"); },
       onError: (msg) => { setErrorMsg(msg); setPhase("error"); },
     });
-  }, [question, reset]);
+  }, [question, submittedQuestion, phase, answer, errorMsg]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── /resume ───────────────────────────────────────────────
 
@@ -352,7 +399,7 @@ export default function Home() {
       <div className="topbar">
         <span className="topbar-title">text-to-sql</span>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          {phase !== "idle" && (
+          {(phase !== "idle" || history.length > 0) && (
             <button
               id="btn-new-question"
               className="btn btn-ghost"
@@ -417,16 +464,27 @@ export default function Home() {
           </div>
 
           {/* Idle */}
-          {phase === "idle" && (
+          {phase === "idle" && history.length === 0 && (
             <div className="idle-prompt">
               ask a question in plain english. sql will be shown for approval before running.
             </div>
           )}
 
-          {/* Question */}
-          {phase !== "idle" && (
+          {/* Chat history — past completed turns */}
+          {history.map(item => (
+            <div key={item.id} className="chat-turn">
+              <div className="question-row">
+                <div className="question-bubble">{item.question}</div>
+              </div>
+              {item.answer && <AnswerBlock data={item.answer} />}
+              {item.errorMsg && <ErrorBlock message={item.errorMsg} />}
+            </div>
+          ))}
+
+          {/* Current turn question bubble */}
+          {submittedQuestion && (
             <div className="question-row">
-              <div className="question-bubble">{question}</div>
+              <div className="question-bubble">{submittedQuestion}</div>
             </div>
           )}
 
